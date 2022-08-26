@@ -1,8 +1,8 @@
 /*
   This file contains the code that will create a file system, mount
   a file system and unmount a file system.
-  
-  THIS CODE COPYRIGHT DOMINIC GIAMPAOLO.  NO WARRANTY IS EXPRESSED 
+
+  THIS CODE COPYRIGHT DOMINIC GIAMPAOLO.  NO WARRANTY IS EXPRESSED
   OR IMPLIED.  YOU MAY USE THIS CODE AND FREELY DISTRIBUTE IT FOR
   NON-COMMERCIAL USE AS LONG AS THIS NOTICE REMAINS ATTACHED.
 
@@ -20,14 +20,25 @@
 
 
 
+/*
+    初始化文件系统
+*/
 myfs_info *
 myfs_create_fs(char *device, char *name, int block_size, char *opts)
 {
+    // 又是先把所有变量声明，哪怕很远的地方才会用到。。。
+    // (我怀疑是汇编写多的人会这样写程序)
     int        dev_block_size, bshift, warned = 0;
     char      *ptr;
     fs_off_t   num_dev_blocks;
     myfs_info *myfs;
 
+    // inode 或者 File Control Block （这个名字更好）是存放文件的元信息的
+    // 比如说文件创建、编辑的时间、权限、以及文件内容存实际存储的磁盘位置
+    // inode 必须按照 block 对齐，也就是说 inode_size 是可以被 block_size 整除的
+    // 原因是为了读写效率，如果不对齐，
+    // 那么为了读取一个文件，势必会遇到一个 inode 跨越两个 block 的情况，
+    // 这时就需要读两次磁盘，才能取到完整数据，造成多余的开销
     if ((block_size % sizeof(myfs_inode)) != 0) {
         printf("ERROR: inode size %d is not an even divisor of the block "
                "size %d\n", sizeof(myfs_inode), block_size);
@@ -38,6 +49,10 @@ myfs_create_fs(char *device, char *name, int block_size, char *opts)
     if (name == NULL)
         name = "untitled";
 
+    // 遍历 volume_name, 不能包含 / 符号
+    // （话说这个循环字符串的方式真 tm 奇技淫巧。。。它利用了 c 字符串的结构是 0 结尾
+    //  假设循环的字符串是 "abc"，那么 *ptr 的值在循环中会是 a, b, c, 0，于是到最后自然终止循环，
+    // 正经人不要这么写程序。。。）
     for(ptr=name; *ptr; ptr++) {
         if (*ptr == '/') {
             if (warned == 0) {
@@ -49,6 +64,7 @@ myfs_create_fs(char *device, char *name, int block_size, char *opts)
         }
     }
 
+    // 以下都是在检查 block_size, 不能小于 512，必须是 2 的幂
     if (block_size < 512) {
         printf("minimum block size is 512 bytes\n");
         block_size = 512;
@@ -62,36 +78,40 @@ myfs_create_fs(char *device, char *name, int block_size, char *opts)
         printf("block_size %d is not a power of two!\n", block_size);
         return NULL;
     }
-        
 
+    // 初始化 myfs_info 结构
+    // calloc = malloc + memset 0
     myfs = (myfs_info *)calloc(1, sizeof(myfs_info));
     if (myfs == NULL) {
         printf("can't allocate mem for myfs_info struct\n");
         return NULL;
     }
 
+    // 初始化 myfs 的一些属性，详细情况先忽略
     myfs->fd = -1;
 
     myfs->nsid = (nspace_id)myfs;   /* we can only do this when creating */
-    
+
     myfs->dsb.magic1 = SUPER_BLOCK_MAGIC1;
     myfs->dsb.magic2 = SUPER_BLOCK_MAGIC2;
     myfs->dsb.magic3 = SUPER_BLOCK_MAGIC3;
     myfs->dsb.fs_byte_order = MYFS_BIG_ENDIAN;  /* checked when mounting */
 
+    // 创建个信号量？是想防止并发写入设备吗。。。教学 fs 净搞花里胡哨的
     myfs->sem = create_sem(MAX_READERS, "myfs_sem");
     if (myfs->sem < 0) {
         printf("can't create semaphore!\n");
         goto cleanup;
     }
-        
 
+    // 打开 device 设备，就是用来模拟磁盘的 big_file 文件
     myfs->fd = open(device, O_RDWR);
     if (myfs->fd < 0) {
         printf("can't open device %s\n", device);
         goto cleanup;
     }
 
+    // 获取硬盘的 block_size, block_num
     dev_block_size = get_device_block_size(myfs->fd);
     num_dev_blocks = get_num_device_blocks(myfs->fd);
     if (block_size < dev_block_size) {
@@ -108,15 +128,17 @@ myfs_create_fs(char *device, char *name, int block_size, char *opts)
         goto cleanup;
     }
 
+    // 继续初始化 fs 属性
     myfs->dsb.block_size       = block_size;
     myfs->dsb.block_shift      = bshift;
     myfs->dev_block_conversion = block_size / dev_block_size;
     myfs->dev_block_size       = dev_block_size;
     myfs->dsb.num_blocks       = num_dev_blocks / myfs->dev_block_conversion;
 
+    // 缓存，先忽略
     init_cache_for_device(myfs->fd, num_dev_blocks / myfs->dev_block_conversion);
 
-
+    // 初始化 tmp blocks，不知道有啥用，先忽略
     if (init_tmp_blocks(myfs) != 0) {
         printf("init_tmp_blocks failed\n");
         goto cleanup;
@@ -126,7 +148,7 @@ myfs_create_fs(char *device, char *name, int block_size, char *opts)
         printf("create storage map failed\n");
         goto cleanup;
     }
-    
+
     if (myfs_create_inodes(myfs) != 0) {
         printf("create inodes failed\n");
         goto cleanup;
@@ -150,10 +172,11 @@ myfs_create_fs(char *device, char *name, int block_size, char *opts)
         printf("creating superblock failed\n");
         goto cleanup;
     }
-    
+
     return myfs;
 
-
+// 文件系统初始化失败，做清理工作，可以先忽略
+// （。。。吐槽无力，写个函数不行吗，大哥，漫天飞线）
 cleanup:
     if (myfs) {
         /* making the file system failed so make sure block zero is bogus */
@@ -174,7 +197,7 @@ cleanup:
         delete_sem(myfs->sem);
 
         free(myfs);
-    }   
+    }
 
     return NULL;
 
@@ -197,7 +220,7 @@ super_block_is_sane(myfs_info *myfs)
                myfs->dsb.magic2, SUPER_BLOCK_MAGIC2,
                myfs->dsb.magic3, SUPER_BLOCK_MAGIC3);
         return 0;
-        
+
     }
 
     if ((myfs->dsb.block_size % myfs->dev_block_size) != 0) {
@@ -227,7 +250,7 @@ super_block_is_sane(myfs_info *myfs)
 
     if (myfs->dsb.block_size != (1 << myfs->dsb.block_shift)) {
         int i;
-        
+
         printf("warning: block_shift %d does not match block size %d\n",
                myfs->dsb.block_shift, myfs->dsb.block_size);
 
@@ -279,7 +302,7 @@ myfs_mount(nspace_id nsid, const char *device, ulong flags,
         ret = ENOMEM;
         goto error0;
     }
-    
+
     myfs->fd = open(device, oflags);
     if (myfs->fd < 0) {
         printf("could not open %s to try and mount a myfs\n", device);
@@ -292,7 +315,7 @@ myfs_mount(nspace_id nsid, const char *device, ulong flags,
         ret = EBADF;
         goto error2;
     }
-        
+
     if (super_block_is_sane(myfs) == 0) {
         printf("bad super block\n");
         ret = EBADF;
@@ -377,15 +400,15 @@ myfs_mount(nspace_id nsid, const char *device, ulong flags,
 /*
    note that the order in which things are done here is *very*
    important. don't mess with it unless you know what you're doing
-*/   
+*/
 int
 myfs_unmount(void *ns)
 {
     myfs_info *myfs = (myfs_info *)ns;
-    
+
     if (myfs == NULL)
         return EINVAL;
-    
+
     sync_journal(myfs);
 
     myfs_shutdown_storage_map(myfs);
@@ -405,7 +428,7 @@ myfs_unmount(void *ns)
     shutdown_tmp_blocks(myfs);
 
     close(myfs->fd);
-    
+
     if (myfs->sem > 0)
         delete_sem(myfs->sem);
 
