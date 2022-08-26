@@ -3,9 +3,9 @@
   for a file system (which in turn will initialize the file system). It
   also has to do a few other housekeeping chores to make sure that the
   file system is unmounted properly and all that.
-  
-  
-  THIS CODE COPYRIGHT DOMINIC GIAMPAOLO.  NO WARRANTY IS EXPRESSED 
+
+
+  THIS CODE COPYRIGHT DOMINIC GIAMPAOLO.  NO WARRANTY IS EXPRESSED
   OR IMPLIED.  YOU MAY USE THIS CODE AND FREELY DISTRIBUTE IT FOR
   NON-COMMERCIAL USE AS LONG AS THIS NOTICE REMAINS ATTACHED.
 
@@ -31,7 +31,7 @@ static int
 get_value(char *str)
 {
     char buff[128];
-    
+
     printf("%s: ", str); fflush(stdout);
     fgets(buff, sizeof(buff), stdin);
 
@@ -56,7 +56,7 @@ main(int argc, char **argv)
             volume_name = argv[i];
         }
     }
-    
+
     if (disk_name == NULL) {
         fprintf(stderr, "makefs error: you must specify a file name that\n");
         fprintf(stderr, "              will contain the file systemn");
@@ -78,5 +78,5 @@ main(int argc, char **argv)
 
     shutdown_block_cache();
 
-    return 0;   
+    return 0;
 }
